@@ -54,7 +54,9 @@ FIX:AAC in some container format (FLV, MP4, MKV etc.) need
 #define USE_AACBSF 0
 
 
-
+/*********************************************************************************************
+ * Description：merlin 将AAC和H264封装成MP4文件
+ * *******************************************************************************************/
 int main(int argc, char* argv[])
 {
 	AVOutputFormat *ofmt = NULL;
@@ -77,31 +79,34 @@ int main(int argc, char* argv[])
 	const char *out_filename = "cuc_ieschool.mp4";//Output file URL
 	av_register_all();
 	//Input
-	if ((ret = avformat_open_input(&ifmt_ctx_v, in_filename_v, 0, 0)) < 0) {
-		printf( "Could not open input file.");
+	if ((ret = avformat_open_input(&ifmt_ctx_v, in_filename_v, 0, 0)) < 0) /*打开输入的视频h264文件*/
+	{
+		printf( "[%s][Error]:Could not open input file. line:%d", __func__, __LINE__);
 		goto end;
 	}
-	if ((ret = avformat_find_stream_info(ifmt_ctx_v, 0)) < 0) {
-		printf( "Failed to retrieve input stream information");
+	if ((ret = avformat_find_stream_info(ifmt_ctx_v, 0)) < 0) 
+	{
+		printf( "[%s][Error]:Failed to retrieve input stream information line:%d", __func__, __LINE__);
 		goto end;
 	}
 
-	if ((ret = avformat_open_input(&ifmt_ctx_a, in_filename_a, 0, 0)) < 0) {
-		printf( "Could not open input file.");
+	if ((ret = avformat_open_input(&ifmt_ctx_a, in_filename_a, 0, 0)) < 0) /*打开输入的MP3文件*/
+	{
+		printf( "[%s][Error]:Could not open input file. line:%d", __func__, __LINE__);
 		goto end;
 	}
 	if ((ret = avformat_find_stream_info(ifmt_ctx_a, 0)) < 0) {
-		printf( "Failed to retrieve input stream information");
+		printf( "[%s][Error]:Failed to retrieve input stream information line:%d", __func__, __LINE__);
 		goto end;
 	}
-	printf("===========Input Information==========\n");
+	printf("[%s]:===========Input Information========== line:%d\n", __func__, __LINE__);
 	av_dump_format(ifmt_ctx_v, 0, in_filename_v, 0);
 	av_dump_format(ifmt_ctx_a, 0, in_filename_a, 0);
-	printf("======================================\n");
+	printf("[%s]:====================================== line:%d\n", __func__, __LINE__);
 	//Output
-	avformat_alloc_output_context2(&ofmt_ctx, NULL, NULL, out_filename);
+	avformat_alloc_output_context2(&ofmt_ctx, NULL, NULL, out_filename); /*初始化AVFormatContext结构体*/
 	if (!ofmt_ctx) {
-		printf( "Could not create output context\n");
+		printf( "[%s][Error]:Could not create output context line:%d\n", __func__, __LINE__);
 		ret = AVERROR_UNKNOWN;
 		goto end;
 	}
@@ -114,14 +119,14 @@ int main(int argc, char* argv[])
 		AVStream *out_stream = avformat_new_stream(ofmt_ctx, in_stream->codec->codec);
 		videoindex_v=i;
 		if (!out_stream) {
-			printf( "Failed allocating output stream\n");
+			printf( "[%s][Error]:Failed allocating output stream line:%d\n", __func__, __LINE__);
 			ret = AVERROR_UNKNOWN;
 			goto end;
 		}
 		videoindex_out=out_stream->index;
 		//Copy the settings of AVCodecContext
 		if (avcodec_copy_context(out_stream->codec, in_stream->codec) < 0) {
-			printf( "Failed to copy context from input to output stream codec context\n");
+			printf( "[%s][Error]:Failed to copy context from input to output stream codec context line:%d\n", __func__, __LINE__);
 			goto end;
 		}
 		out_stream->codec->codec_tag = 0;
@@ -138,14 +143,14 @@ int main(int argc, char* argv[])
 			AVStream *out_stream = avformat_new_stream(ofmt_ctx, in_stream->codec->codec);
 			audioindex_a=i;
 			if (!out_stream) {
-				printf( "Failed allocating output stream\n");
+				printf("[%s][Error]:Failed allocating output stream line:%d\n", __func__, __LINE__);
 				ret = AVERROR_UNKNOWN;
 				goto end;
 			}
 			audioindex_out=out_stream->index;
 			//Copy the settings of AVCodecContext
 			if (avcodec_copy_context(out_stream->codec, in_stream->codec) < 0) {
-				printf( "Failed to copy context from input to output stream codec context\n");
+				printf("[%s][Error]:Failed to copy context from input to output stream codec context line:%d\n", __func__, __LINE__);
 				goto end;
 			}
 			out_stream->codec->codec_tag = 0;
@@ -156,19 +161,19 @@ int main(int argc, char* argv[])
 		}
 	}
 
-	printf("==========Output Information==========\n");
+	printf("[%s]:==========Output Information========== line:%d\n", __func__, __LINE__);
 	av_dump_format(ofmt_ctx, 0, out_filename, 1);
-	printf("======================================\n");
+	printf("[%s]:====================================== line:%d\n", __func__, __LINE__);
 	//Open output file
 	if (!(ofmt->flags & AVFMT_NOFILE)) {
 		if (avio_open(&ofmt_ctx->pb, out_filename, AVIO_FLAG_WRITE) < 0) {
-			printf( "Could not open output file '%s'", out_filename);
+			printf( "[%s][Error]:Could not open output file '%s' line:%d\n", __func__, out_filename, __LINE__);
 			goto end;
 		}
 	}
 	//Write file header
 	if (avformat_write_header(ofmt_ctx, NULL) < 0) {
-		printf( "Error occurred when opening output file\n");
+		printf( "[%s][Error]:Error occurred when opening output file line:%d\n", __func__, __LINE__);
 		goto end;
 	}
 
@@ -268,10 +273,10 @@ int main(int argc, char* argv[])
 		pkt.pos = -1;
 		pkt.stream_index=stream_index;
 
-		printf("Write 1 Packet. size:%5d\tpts:%lld\n",pkt.size,pkt.pts);
+		//printf("[%s]:Write 1 Packet. size:%5d\tpts:%lld line:%d\n", __func__, pkt.size,pkt.pts, __LINE__);
 		//Write
 		if (av_interleaved_write_frame(ofmt_ctx, &pkt) < 0) {
-			printf( "Error muxing packet\n");
+			printf( "[%s][Error]: muxing packet line:%d\n", __func__, __LINE__);
 			break;
 		}
 		av_free_packet(&pkt);
@@ -295,7 +300,7 @@ end:
 		avio_close(ofmt_ctx->pb);
 	avformat_free_context(ofmt_ctx);
 	if (ret < 0 && ret != AVERROR_EOF) {
-		printf( "Error occurred.\n");
+		printf( "[%s][Error]:Error occurred. line:%d\n", __func__, __LINE__);
 		return -1;
 	}
 	return 0;
