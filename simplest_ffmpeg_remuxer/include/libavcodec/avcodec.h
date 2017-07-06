@@ -1161,16 +1161,16 @@ typedef struct AVPacket {
      * the terms dts and pts/cts to mean something different. Such timestamps
      * must be converted to true pts/dts before they are stored in AVPacket.
      */
-    int64_t pts;
+    int64_t pts; /*显示时间戳*/
     /**
      * Decompression timestamp in AVStream->time_base units; the time at which
      * the packet is decompressed.
      * Can be AV_NOPTS_VALUE if it is not stored in the file.
      */
-    int64_t dts;
-    uint8_t *data;
-    int   size;
-    int   stream_index;
+    int64_t dts; /*解码时间戳*/
+    uint8_t *data; /*压缩变编码的数据,对于H264来说1个AVPacket的data通常对应一个NAL*/
+    int   size; /*data的大小*/
+    int   stream_index; /*标识该AVPacket所属的视频/音频流*/
     /**
      * A combination of AV_PKT_FLAG values
      */
