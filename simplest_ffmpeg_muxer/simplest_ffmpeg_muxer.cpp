@@ -53,12 +53,220 @@ FIX:AAC in some container format (FLV, MP4, MKV etc.) need
 //'1': Use AAC Bitstream Filter 
 #define USE_AACBSF 0
 
+/*********************************************************************************************
+* Description:几个常用结构体的定义
+**********************************************************************************************/
+typedef struct _AVCount{
+	int AInCount;
+	int VInCount;
+	int AOutCount;
+	int VOutCount;
+} AVCount, *P_AVCount;
+
+/**********************************************************************************************
+* Description:打开媒体文件，输入的视频文件和音频文件
+**********************************************************************************************/
+int openInUrl(AVFormatContext **AVFContext, const char *url)
+{
+	int ret = 0;
+	if ((ret = avformat_open_input(AVFContext, url, 0, 0)) < 0) /*打开输入的视频h264文件*/
+	{
+		printf( "[%s][Error]:Could not open url=%s. line:%d", __func__, url, __LINE__);
+		return -1;
+		//goto end;
+	}
+	if ((ret = avformat_find_stream_info(*AVFContext, 0)) < 0) 
+	{
+		printf( "[%s][Error]:Failed to retrieve input stream information line:%d", __func__, __LINE__);
+		return -1;
+		//goto end;
+	}
+	return 0;
+}
+
+/********************************************************************************************
+ * Description:在输出流中增加视频通道
+ *********************************************************************************************/
+int addStreamV(AVFormatContext **PinAVFctx, AVFormatContext **PoutAVFctx, AVCount *AVCount)
+{
+	int i = 0, ret = 0;
+	AVFormatContext *inAVFctx = *PinAVFctx, *outAVFctx = *PoutAVFctx;
+
+
+	for (i = 0; i < inAVFctx->nb_streams; i++) /*对每一路视频流进行处理*/
+	{
+		//(根据输入流创建输出流)Create output AVStream according to input AVStream
+		printf("[%s]:video codec_type=%d line:%d\n", __func__, (inAVFctx->streams[i]->codec->codec_type), __LINE__);
+		if(inAVFctx->streams[i]->codec->codec_type==AVMEDIA_TYPE_VIDEO) /*媒体数据的类型是视频*/
+		{
+			AVStream *in_stream = inAVFctx->streams[i]; /*第i路输入视频流*/
+			AVStream *out_stream = avformat_new_stream(outAVFctx, in_stream->codec->codec); /*在输出文件中增加一个视频通道*/
+			//videoindex_v=i;
+			if (!out_stream) {
+				printf( "[%s][Error]:Failed allocating output stream line:%d\n", __func__, __LINE__);
+				ret = AVERROR_UNKNOWN;
+				return -1;
+				//goto end;
+			}
+			AVCount->VInCount = i;
+			AVCount->VOutCount = out_stream->index;
+			//videoindex_out=out_stream->index;
+			//(复制AVCodecContext的设置)Copy the settings of AVCodecContext
+			if (avcodec_copy_context(out_stream->codec, in_stream->codec) < 0) {
+				printf( "[%s][Error]:Failed to copy context from input to output stream codec context line:%d\n", __func__, __LINE__);
+				return -1;
+				//goto end;
+			}
+			out_stream->codec->codec_tag = 0;
+			if (outAVFctx->oformat->flags & AVFMT_GLOBALHEADER)
+				out_stream->codec->flags |= CODEC_FLAG_GLOBAL_HEADER;
+			break;
+		}
+	}
+
+	return 0;
+}
+
+/********************************************************************************************
+ * Description:在输出流中增加音频通道
+ *********************************************************************************************/
+int addStreamA(AVFormatContext **PinAVFctx, AVFormatContext **PoutAVFctx, AVCount *AVCount)
+{
+	int i = 0, ret = 0;
+	AVFormatContext *inAVFctx = *PinAVFctx, *outAVFctx = *PoutAVFctx;
+
+	for (i = 0; i < inAVFctx->nb_streams; i++) {
+		//(根据输入流创建输出流)Create output AVStream according to input AVStream
+		printf("[%s]:audio codec_type=%d line:%d\n", __func__, (inAVFctx->streams[i]->codec->codec_type), __LINE__);
+		if(inAVFctx->streams[i]->codec->codec_type==AVMEDIA_TYPE_AUDIO){
+			AVStream *in_stream = inAVFctx->streams[i]; /*第i路输入音频流*/
+			AVStream *out_stream = avformat_new_stream(outAVFctx, in_stream->codec->codec); /*在输出文件中增加一个音频通道*/
+			//audioindex_a=i;
+			if (!out_stream) {
+				printf("[%s][Error]:Failed allocating output stream line:%d\n", __func__, __LINE__);
+				ret = AVERROR_UNKNOWN;
+				return -1;
+				//goto end;
+			}
+			AVCount->AInCount = i;
+			AVCount->AOutCount = out_stream->index;
+			//audioindex_out=out_stream->index;
+			//(复制AVCodecContext的设置)Copy the settings of AVCodecContext
+			if (avcodec_copy_context(out_stream->codec, in_stream->codec) < 0) {
+				printf("[%s][Error]:Failed to copy context from input to output stream codec context line:%d\n", __func__, __LINE__);
+				return -1;
+				//goto end;
+			}
+			out_stream->codec->codec_tag = 0;
+			if (outAVFctx->oformat->flags & AVFMT_GLOBALHEADER)
+				out_stream->codec->flags |= CODEC_FLAG_GLOBAL_HEADER;
+
+			break;
+		}
+	}
+	return 0;
+}
+
+/*******************************************************************************************
+ * Description:根据pts计算 dts和duration 视频
+ ********************************************************************************************/
+int calculatePKTDataV(AVStream **Pin_stream, AVPacket *pkt)
+{
+	static int frame_index = 0;
+	AVStream *in_stream = *Pin_stream;
+	//Write PTS
+	AVRational time_base1=in_stream->time_base;
+	//Duration between 2 frames (us)
+	int64_t calc_duration=(double)AV_TIME_BASE/av_q2d(in_stream->r_frame_rate);
+	//printf("[%s][mDebug1]:frame_index=%d size=%d calc_duration=%lld pts=%lld dts=%lld duration=%lld line:%d\n", __func__, frame_index, (pkt.size), calc_duration,(pkt.pts), (pkt.dts), (pkt.duration), __LINE__);
+	
+	//Parameters
+	pkt->pts=(double)(frame_index*calc_duration)/(double)(av_q2d(time_base1)*AV_TIME_BASE);
+	pkt->dts=pkt->pts;
+	pkt->duration=(double)calc_duration/(double)(av_q2d(time_base1)*AV_TIME_BASE);
+	frame_index++;
+	return 0;
+}
+
+/*******************************************************************************************
+ * Description:根据pts计算 dts和duration 音频
+ ********************************************************************************************/
+int	calculatePKTDataA(AVStream **Pin_stream, AVPacket *pkt)
+{
+	static int frame_index = 0;
+	AVStream *in_stream = *Pin_stream;
+	//Write PTS
+	AVRational time_base1=in_stream->time_base;
+	//Duration between 2 frames (us)
+	int64_t calc_duration=(double)AV_TIME_BASE/av_q2d(in_stream->r_frame_rate);
+	//Parameters
+	pkt->pts=(double)(frame_index*calc_duration)/(double)(av_q2d(time_base1)*AV_TIME_BASE);
+	pkt->dts=pkt->pts;
+	pkt->duration=(double)calc_duration/(double)(av_q2d(time_base1)*AV_TIME_BASE);
+	frame_index++;
+	//aFrameCount++;
+	//printf("[%s]:=%d aFrameCount line:%d\n", __func__, aFrameCount, __LINE__);
+	return 0;
+}
+
+
+/*********************************************************************************************
+ * Description:在输出流中增加视和音频通道
+ *
+ *********************************************************************************************/
+int initOutStram(AVFormatContext **PinAVFctx, AVFormatContext **PoutAVFctx, AVCount *AVCount)
+{
+	int i = 0, ret = 0;
+	AVFormatContext *inAVFctx = *PinAVFctx, *outAVFctx = *PoutAVFctx;
+
+	printf("[%s]:init ifmt_ctx_v nb_streams=%d line:%d\n", __func__, (inAVFctx->nb_streams), __LINE__);
+	for (i = 0; i < inAVFctx->nb_streams; i++) /*对每一路视频流进行处理*/
+	{
+		AVStream *in_stream = inAVFctx->streams[i]; /*第i路输入视频流*/
+		AVStream *out_stream = avformat_new_stream(outAVFctx, in_stream->codec->codec); /*在输出文件中增加一个视频通道*/
+		//memset(in_stream, 0, sizeof(AVStream));
+		//memset(out_stream, 0, sizeof(out_stream));
+		//videoindex_v=i;
+		if (!out_stream) {
+			printf( "[%s][Error]:Failed allocating output stream line:%d\n", __func__, __LINE__);
+			ret = AVERROR_UNKNOWN;
+			return ret;
+			//goto end;
+		}
+		//videoindex_out=out_stream->index;
+		//(复制AVCodecContext的设置)Copy the settings of AVCodecContext
+		if (avcodec_copy_context(out_stream->codec, in_stream->codec) < 0) {
+			printf( "[%s][Error]:Failed to copy context from input to output stream codec context line:%d\n", __func__, __LINE__);
+			return -1;
+			//goto end;
+		}
+		out_stream->codec->codec_tag = 0;
+		if (outAVFctx->oformat->flags & AVFMT_GLOBALHEADER){
+			out_stream->codec->flags |= CODEC_FLAG_GLOBAL_HEADER;
+			break;
+		}
+		//(根据输入流创建输出流)Create output AVStream according to input AVStream
+		printf("[%s]:video codec_type=%d line:%d\n", __func__, (inAVFctx->streams[i]->codec->codec_type), __LINE__);
+		if(inAVFctx->streams[i]->codec->codec_type==AVMEDIA_TYPE_VIDEO){
+			AVCount->VInCount = i;
+			AVCount->VOutCount = out_stream->index;
+		}
+		else if(inAVFctx->streams[i]->codec->codec_type==AVMEDIA_TYPE_AUDIO){
+			AVCount->AInCount = i;
+			AVCount->AOutCount = out_stream->index;
+		}
+	}
+	return 0;
+}
 
 /*********************************************************************************************
  * Description：merlin 将AAC和H264封装成MP4文件.
  * *******************************************************************************************/
 int main(int argc, char* argv[])
 {
+	AVCount AVCounter;
+	int counterV = 0, counterA = 0;
+	
 	int vFrameCount = 0, aFrameCount = 0;
 	AVOutputFormat *ofmt = NULL;
 	//Input AVFormatContext and Output AVFormatContext
@@ -74,40 +282,21 @@ int main(int argc, char* argv[])
 	const char *in_filename_v = "cuc_ieschool.h264";
 	//const char *in_filename_a = "cuc_ieschool.mp3";
 	//const char *in_filename_a = "gowest.m4a";
-	//const char *in_filename_a = "gowest.aac";
-	const char *in_filename_a = "huoyuanjia.mp3";
+	const char *in_filename_a = "gowest.aac";
+	//const char *in_filename_a = "huoyuanjia.mp3";
 
 	const char *out_filename = "cuc_ieschool.mp4";//Output file URL
 	av_register_all();
-	//Input
-	if ((ret = avformat_open_input(&ifmt_ctx_v, in_filename_v, 0, 0)) < 0) /*打开输入的视频h264文件*/
-	{
-		printf( "[%s][Error]:Could not open input file. line:%d", __func__, __LINE__);
-		goto end;
-	}
-	if ((ret = avformat_find_stream_info(ifmt_ctx_v, 0)) < 0) 
-	{
-		printf( "[%s][Error]:Failed to retrieve input stream information line:%d", __func__, __LINE__);
-		goto end;
-	}
 
-	if ((ret = avformat_open_input(&ifmt_ctx_a, in_filename_a, 0, 0)) < 0) /*打开输入的MP3文件*/
-	{
-		printf( "[%s][Error]:Could not open input file. line:%d", __func__, __LINE__);
-		goto end;
-	}
-	if ((ret = avformat_find_stream_info(ifmt_ctx_a, 0)) < 0) {
-		printf( "[%s][Error]:Failed to retrieve input stream information line:%d", __func__, __LINE__);
-		goto end;
-	}
+	/*打开所有输入文件*/
+	openInUrl(&ifmt_ctx_v, in_filename_v);
+	openInUrl(&ifmt_ctx_a, in_filename_a);
+
 	/*调用调试函数向终端打印出一些媒体信息*/
 	printf("[%s]:===========Input Information========== line:%d\n", __func__, __LINE__);
-	av_dump_format(ifmt_ctx_v, 0, in_filename_v, 0); /*打印输入的视频文件相关信息*/
-	av_dump_format(ifmt_ctx_a, 0, in_filename_a, 0); /*打印输入的音频文件的相关信息*/
+	//av_dump_format(ifmt_ctx_v, 0, in_filename_v, 0); /*打印输入的视频文件相关信息*/
+	//av_dump_format(ifmt_ctx_a, 0, in_filename_a, 0); /*打印输入的音频文件的相关信息*/
 	printf("[%s]:====================================== line:%d\n", __func__, __LINE__);
-#if 1 /*输入的文件的相关信息*/
-
-#endif
 	//Output
 	avformat_alloc_output_context2(&ofmt_ctx, NULL, NULL, out_filename); /*初始化输出流结构体*/
 	if (!ofmt_ctx) {
@@ -116,61 +305,13 @@ int main(int argc, char* argv[])
 		goto end;
 	}
 	ofmt = ofmt_ctx->oformat; /*容器的输出格式，也就是输出文件的类型*/
-
-	/*视频数据的相关处理*/
-	printf("[%s]:init ifmt_ctx_v nb_streams=%d line:%d\n", __func__, (ifmt_ctx_v->nb_streams), __LINE__);
-	for (i = 0; i < ifmt_ctx_v->nb_streams; i++) /*对每一路视频流进行处理*/
-	{
-		//(根据输入流创建输出流)Create output AVStream according to input AVStream
-		if(ifmt_ctx_v->streams[i]->codec->codec_type==AVMEDIA_TYPE_VIDEO) /*媒体数据的类型是视频*/
-		{
-			AVStream *in_stream = ifmt_ctx_v->streams[i]; /*第i路输入视频流*/
-			AVStream *out_stream = avformat_new_stream(ofmt_ctx, in_stream->codec->codec); /*在输出文件中增加一个视频通道*/
-			videoindex_v=i;
-			if (!out_stream) {
-				printf( "[%s][Error]:Failed allocating output stream line:%d\n", __func__, __LINE__);
-				ret = AVERROR_UNKNOWN;
-				goto end;
-			}
-			videoindex_out=out_stream->index;
-			//(复制AVCodecContext的设置)Copy the settings of AVCodecContext
-			if (avcodec_copy_context(out_stream->codec, in_stream->codec) < 0) {
-				printf( "[%s][Error]:Failed to copy context from input to output stream codec context line:%d\n", __func__, __LINE__);
-				goto end;
-			}
-			out_stream->codec->codec_tag = 0;
-			if (ofmt_ctx->oformat->flags & AVFMT_GLOBALHEADER)
-				out_stream->codec->flags |= CODEC_FLAG_GLOBAL_HEADER;
-			break;
-		}
-	}
-
-	/*音频相关数据的处理*/
-	printf("[%s]:init ifmt_ctx_a nb_streams=%d line:%d\n", __func__, (ifmt_ctx_v->nb_streams), __LINE__);
-	for (i = 0; i < ifmt_ctx_a->nb_streams; i++) {
-		//(根据输入流创建输出流)Create output AVStream according to input AVStream
-		if(ifmt_ctx_a->streams[i]->codec->codec_type==AVMEDIA_TYPE_AUDIO){
-			AVStream *in_stream = ifmt_ctx_a->streams[i]; /*第i路输入音频流*/
-			AVStream *out_stream = avformat_new_stream(ofmt_ctx, in_stream->codec->codec); /*在输出文件中增加一个音频通道*/
-			audioindex_a=i;
-			if (!out_stream) {
-				printf("[%s][Error]:Failed allocating output stream line:%d\n", __func__, __LINE__);
-				ret = AVERROR_UNKNOWN;
-				goto end;
-			}
-			audioindex_out=out_stream->index;
-			//(复制AVCodecContext的设置)Copy the settings of AVCodecContext
-			if (avcodec_copy_context(out_stream->codec, in_stream->codec) < 0) {
-				printf("[%s][Error]:Failed to copy context from input to output stream codec context line:%d\n", __func__, __LINE__);
-				goto end;
-			}
-			out_stream->codec->codec_tag = 0;
-			if (ofmt_ctx->oformat->flags & AVFMT_GLOBALHEADER)
-				out_stream->codec->flags |= CODEC_FLAG_GLOBAL_HEADER;
-
-			break;
-		}
-	}
+	memset(&AVCounter,0, sizeof(AVCounter));
+	addStreamV(&ifmt_ctx_v, &ofmt_ctx, &AVCounter);
+	addStreamA(&ifmt_ctx_a, &ofmt_ctx, &AVCounter);
+	videoindex_v = AVCounter.VInCount;
+	audioindex_a = AVCounter.AInCount;
+	videoindex_out = AVCounter.VOutCount;
+	audioindex_out = AVCounter.AOutCount;
 
 	printf("[%s]:==========Output Information========== line:%d\n", __func__, __LINE__);
 	av_dump_format(ofmt_ctx, 0, out_filename, 1); /*打印输出文件的相关信息*/
@@ -207,6 +348,7 @@ int main(int argc, char* argv[])
 		//Get an AVPacket
 		if(av_compare_ts(cur_pts_v,ifmt_ctx_v->streams[videoindex_v]->time_base,cur_pts_a,ifmt_ctx_a->streams[audioindex_a]->time_base) <= 0)
 		{
+			counterV++;
 			ifmt_ctx=ifmt_ctx_v;
 			stream_index=videoindex_out;
 
@@ -220,18 +362,8 @@ int main(int argc, char* argv[])
 					{
 						//FIX：No PTS (Example: Raw H.264)
 						//Simple Write PTS
-						if(pkt.pts==AV_NOPTS_VALUE)
-						{
-							//Write PTS
-							AVRational time_base1=in_stream->time_base;
-							//Duration between 2 frames (us)
-							int64_t calc_duration=(double)AV_TIME_BASE/av_q2d(in_stream->r_frame_rate);
-							//Parameters
-							pkt.pts=(double)(frame_index*calc_duration)/(double)(av_q2d(time_base1)*AV_TIME_BASE);
-							pkt.dts=pkt.pts;
-							pkt.duration=(double)calc_duration/(double)(av_q2d(time_base1)*AV_TIME_BASE);
-							frame_index++;
-							vFrameCount++;
+						if(pkt.pts==AV_NOPTS_VALUE){
+							calculatePKTDataV(&in_stream, &pkt);
 						}
 
 						cur_pts_v=pkt.pts;
@@ -243,6 +375,7 @@ int main(int argc, char* argv[])
 			}
 		}else
 		{
+			counterA++;
 			ifmt_ctx=ifmt_ctx_a;
 			stream_index=audioindex_out;
 			if(av_read_frame(ifmt_ctx, &pkt) >= 0) /*读取完整的数据帧*/
@@ -256,18 +389,8 @@ int main(int argc, char* argv[])
 
 						//FIX：No PTS
 						//Simple Write PTS
-						if(pkt.pts==AV_NOPTS_VALUE)
-						{
-							//Write PTS
-							AVRational time_base1=in_stream->time_base;
-							//Duration between 2 frames (us)
-							int64_t calc_duration=(double)AV_TIME_BASE/av_q2d(in_stream->r_frame_rate);
-							//Parameters
-							pkt.pts=(double)(frame_index*calc_duration)/(double)(av_q2d(time_base1)*AV_TIME_BASE);
-							pkt.dts=pkt.pts;
-							pkt.duration=(double)calc_duration/(double)(av_q2d(time_base1)*AV_TIME_BASE);
-							frame_index++;
-							aFrameCount++;
+						if(pkt.pts==AV_NOPTS_VALUE){
+							calculatePKTDataA(&in_stream, &pkt);
 						}
 						cur_pts_a=pkt.pts;
 
@@ -307,7 +430,7 @@ int main(int argc, char* argv[])
 
 	}
 #if 1 /*输出的MP4文件的相关信息*/
-	printf("[%s]:vFrameCount=%d aFrameCount=%d line:%d\n", __func__, vFrameCount, aFrameCount, __LINE__);
+	printf("[%s]:vFrameCount=%d aFrameCount=%d counterV=%d counterA=%d line:%d\n", __func__, vFrameCount, aFrameCount, counterV, counterA, __LINE__);
 #endif
 	//Write file trailer
 	av_write_trailer(ofmt_ctx); /*写文件尾*/
