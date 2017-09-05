@@ -44,6 +44,29 @@ H.264 in some container (MPEG2TS) don't need this BSF.
 //'1': Use H.264 Bitstream Filter 
 #define USE_H264BSF 0
 
+/**********************************************************************************
+* Description:打印AVPacket相关信息
+* Inpurt pkt:AVPacket结构体
+***********************************************************************************/
+void printAVPacketInfo(struct AVPacket *pkt)
+{
+	static int count = 0;
+
+#if 0
+	/*只打印几个数据包*/
+	count++;
+	if((60 > count) || (90 < count)) {
+		return;
+	}
+	if(0 == (count%2))
+		return;
+#endif
+	//pkt.stream_index; //可以判断出数据类型是视频还是音频
+	printf("[%s]:%d type=%d size:%d duration:%lld flag:%d pts:%lld dts:%lld line:%d\n", __func__, count, (pkt->stream_index), (pkt->size), (pkt->duration), (pkt->flags), (pkt->pts), (pkt->dts), __LINE__);
+
+	return ;
+}
+
 int main(int argc, char* argv[])
 {
 	AVOutputFormat *ofmt_a = NULL,*ofmt_v = NULL;
@@ -54,27 +77,29 @@ int main(int argc, char* argv[])
 	int videoindex=-1,audioindex=-1;
 	int frame_index=0;
 
+	/*输入和输出文件的名称*/
 	const char *in_filename  = "cuc_ieschool.ts";//Input file URL
 	//char *in_filename  = "cuc_ieschool.mkv";
 	const char *out_filename_v = "cuc_ieschool.h264";//Output file URL
 	//char *out_filename_a = "cuc_ieschool.mp3";
 	const char *out_filename_a = "cuc_ieschool.aac";
+	printf("[%s]:inFile=%s outFile=%s-%s line:%d\n", __func__, in_filename, out_filename_v, out_filename_a, __LINE__);
 
 	av_register_all();
 	//Input
 	if ((ret = avformat_open_input(&ifmt_ctx, in_filename, 0, 0)) < 0) {
-		printf( "Could not open input file.");
+		printf("[%s][Error]:Could not open input file. line:%d\n", __func__, __LINE__);
 		goto end;
 	}
 	if ((ret = avformat_find_stream_info(ifmt_ctx, 0)) < 0) {
-		printf( "Failed to retrieve input stream information");
+		printf("[%s][Error]:Failed to retrieve input stream information line:%d\n", __func__, __LINE__);
 		goto end;
 	}
 
 	//Output
 	avformat_alloc_output_context2(&ofmt_ctx_v, NULL, NULL, out_filename_v);
 	if (!ofmt_ctx_v) {
-		printf( "Could not create output context\n");
+		printf("[%s][Error]:Could not create output context line:%d\n", __func__, __LINE__);
 		ret = AVERROR_UNKNOWN;
 		goto end;
 	}
@@ -82,7 +107,7 @@ int main(int argc, char* argv[])
 
 	avformat_alloc_output_context2(&ofmt_ctx_a, NULL, NULL, out_filename_a);
 	if (!ofmt_ctx_a) {
-		printf( "Could not create output context\n");
+		printf("[%s][Error]:Could not create output context line:%d\n", __func__, __LINE__);
 		ret = AVERROR_UNKNOWN;
 		goto end;
 	}
@@ -107,13 +132,13 @@ int main(int argc, char* argv[])
 			}
 			
 			if (!out_stream) {
-				printf( "Failed allocating output stream\n");
+				printf( "[%s][Error]:Failed allocating output stream line:%d\n", __func__, __LINE__);
 				ret = AVERROR_UNKNOWN;
 				goto end;
 			}
 			//Copy the settings of AVCodecContext
 			if (avcodec_copy_context(out_stream->codec, in_stream->codec) < 0) {
-				printf( "Failed to copy context from input to output stream codec context\n");
+				printf("[%s][Error]:Failed to copy context from input to output stream codec context line:%d\n", __func__, __LINE__);
 				goto end;
 			}
 			out_stream->codec->codec_tag = 0;
@@ -122,6 +147,7 @@ int main(int argc, char* argv[])
 				out_stream->codec->flags |= CODEC_FLAG_GLOBAL_HEADER;
 	}
 
+	printf("[%s]:nb_streams=%d videoindex=%d audioindex=%d line:%d\n", __func__, (ifmt_ctx->nb_streams), videoindex, audioindex,  __LINE__);
 	//Dump Format------------------
 	printf("\n==============Input Video=============\n");
 	av_dump_format(ifmt_ctx, 0, in_filename, 0);
@@ -133,25 +159,25 @@ int main(int argc, char* argv[])
 	//Open output file
 	if (!(ofmt_v->flags & AVFMT_NOFILE)) {
 		if (avio_open(&ofmt_ctx_v->pb, out_filename_v, AVIO_FLAG_WRITE) < 0) {
-			printf( "Could not open output file '%s'", out_filename_v);
+			printf("[%s][Error]:Could not open output file '%s' line:%d\n", __func__, out_filename_v, __LINE__);
 			goto end;
 		}
 	}
 
 	if (!(ofmt_a->flags & AVFMT_NOFILE)) {
 		if (avio_open(&ofmt_ctx_a->pb, out_filename_a, AVIO_FLAG_WRITE) < 0) {
-			printf( "Could not open output file '%s'", out_filename_a);
+			printf("[%s][Error]:Could not open output file '%s' line:%d\n", __func__, out_filename_a, __LINE__);
 			goto end;
 		}
 	}
 
 	//Write file header
 	if (avformat_write_header(ofmt_ctx_v, NULL) < 0) {
-		printf( "Error occurred when opening video output file\n");
+		printf("[%s][Error]:Error occurred when opening video output file line:%d\n", __func__, __LINE__);
 		goto end;
 	}
 	if (avformat_write_header(ofmt_ctx_a, NULL) < 0) {
-		printf( "Error occurred when opening audio output file\n");
+		printf("[%s][Error]:Error occurred when opening audio output file line:%d\n", __func__, __LINE__);
 		goto end;
 	}
 	
@@ -169,30 +195,33 @@ int main(int argc, char* argv[])
 
 		
 		if(pkt.stream_index==videoindex){
+			/*输出视频文件*/
 			out_stream = ofmt_ctx_v->streams[0];
 			ofmt_ctx=ofmt_ctx_v;
-			printf("Write Video Packet. size:%d\tpts:%lld\n",pkt.size,pkt.pts);
+			//printf("Write Video Packet. size:%d\tpts:%lld\n",pkt.size,pkt.pts);
 #if USE_H264BSF
 			av_bitstream_filter_filter(h264bsfc, in_stream->codec, NULL, &pkt.data, &pkt.size, pkt.data, pkt.size, 0);
 #endif
 		}else if(pkt.stream_index==audioindex){
+			/*输出音频文件*/
 			out_stream = ofmt_ctx_a->streams[0];
 			ofmt_ctx=ofmt_ctx_a;
-			printf("Write Audio Packet. size:%d\tpts:%lld\n",pkt.size,pkt.pts);
+			//printf("Write Audio Packet. size:%d\tpts:%lld\n",pkt.size,pkt.pts);
 		}else{
 			continue;
 		}
 
-
+		printAVPacketInfo(&pkt);
 		//Convert PTS/DTS
 		pkt.pts = av_rescale_q_rnd(pkt.pts, in_stream->time_base, out_stream->time_base, (AVRounding)(AV_ROUND_NEAR_INF|AV_ROUND_PASS_MINMAX));
 		pkt.dts = av_rescale_q_rnd(pkt.dts, in_stream->time_base, out_stream->time_base, (AVRounding)(AV_ROUND_NEAR_INF|AV_ROUND_PASS_MINMAX));
 		pkt.duration = av_rescale_q(pkt.duration, in_stream->time_base, out_stream->time_base);
 		pkt.pos = -1;
 		pkt.stream_index=0;
+		printAVPacketInfo(&pkt);
 		//Write
 		if (av_interleaved_write_frame(ofmt_ctx, &pkt) < 0) {
-			printf( "Error muxing packet\n");
+			printf("[%s][Error]:Error muxing packet line:%d\n", __func__, __LINE__);
 			break;
 		}
 		//printf("Write %8d frames to output file\n",frame_index);
@@ -221,7 +250,7 @@ end:
 
 
 	if (ret < 0 && ret != AVERROR_EOF) {
-		printf( "Error occurred.\n");
+		printf("[%s][Error]:Error occurred. line:%d\n", __func__, __LINE__);
 		return -1;
 	}
 	return 0;
