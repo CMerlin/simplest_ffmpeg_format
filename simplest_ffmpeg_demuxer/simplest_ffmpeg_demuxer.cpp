@@ -67,6 +67,42 @@ void printAVPacketInfo(struct AVPacket *pkt)
 	return ;
 }
 
+/************************************************************************
+* Description:计算音视频文件的长度，单位是秒
+* Return:视频文件的长度(单位是秒)
+***********************************************************************/
+double getFileLen(AVStream *st)
+{
+	double ret = 0;
+	ret = st->duration * av_q2d(st->time_base); /* 计算视频长度的方法 */
+	return ret;
+}
+
+/************************************************************************
+* Desription:计算某桢，在整个视频中的时间位置
+* Return：位置(单位是秒)
+************************************************************************/
+double curPosition(double pts, AVStream *st)
+{
+	double ret = 0;
+	ret = pts * av_q2d(st->time_base); /* 现在可以根据pts来计算一桢在整个视频中的时间位置 */
+	return ret;
+}
+
+/************************************************************************
+* Description:把视频跳转到第N秒
+* Input pos:需要跳转的位置（单位是秒）
+* Input stream_index：通道号，其实也就是时间的类型，视频或是音频
+* Reurun:0-成功 -1-：失败
+*************************************************************************/
+int seekFrame(long long pos, int stream_index, AVFormatContext *fmtctx)
+{
+	int ret = 0;
+	int64_t timestamp = pos * AV_TIME_BASE;
+	ret = av_seek_frame(fmtctx, stream_index, timestamp, AVSEEK_FLAG_BACKWARD);
+	return ret;
+}
+
 int main(int argc, char* argv[])
 {
 	AVOutputFormat *ofmt_a = NULL,*ofmt_v = NULL;
@@ -118,7 +154,8 @@ int main(int argc, char* argv[])
 			AVFormatContext *ofmt_ctx;
 			AVStream *in_stream = ifmt_ctx->streams[i];
 			AVStream *out_stream = NULL;
-			
+
+			printf("[%s]:index=%d fileLen=%lf line:%d\n", __func__, i, getFileLen(in_stream), __LINE__);
 			if(ifmt_ctx->streams[i]->codec->codec_type==AVMEDIA_TYPE_VIDEO){
 				videoindex=i;
 				out_stream=avformat_new_stream(ofmt_ctx_v, in_stream->codec->codec);
@@ -195,9 +232,11 @@ int main(int argc, char* argv[])
 
 		
 		if(pkt.stream_index==videoindex){
+			//printf("[%s]:curPos=%lf line:%d\n", __func__, (	curPosition((pkt.pts), (in_stream))), __LINE__);
 			/*输出视频文件*/
 			out_stream = ofmt_ctx_v->streams[0];
 			ofmt_ctx=ofmt_ctx_v;
+			//seekFrame(20, videoindex, ofmt_ctx);
 			//printf("Write Video Packet. size:%d\tpts:%lld\n",pkt.size,pkt.pts);
 #if USE_H264BSF
 			av_bitstream_filter_filter(h264bsfc, in_stream->codec, NULL, &pkt.data, &pkt.size, pkt.data, pkt.size, 0);
@@ -211,14 +250,14 @@ int main(int argc, char* argv[])
 			continue;
 		}
 
-		printAVPacketInfo(&pkt);
+		//printAVPacketInfo(&pkt); /* 输出pkg相关的信息 */
 		//Convert PTS/DTS
 		pkt.pts = av_rescale_q_rnd(pkt.pts, in_stream->time_base, out_stream->time_base, (AVRounding)(AV_ROUND_NEAR_INF|AV_ROUND_PASS_MINMAX));
 		pkt.dts = av_rescale_q_rnd(pkt.dts, in_stream->time_base, out_stream->time_base, (AVRounding)(AV_ROUND_NEAR_INF|AV_ROUND_PASS_MINMAX));
 		pkt.duration = av_rescale_q(pkt.duration, in_stream->time_base, out_stream->time_base);
 		pkt.pos = -1;
 		pkt.stream_index=0;
-		printAVPacketInfo(&pkt);
+		//printAVPacketInfo(&pkt);
 		//Write
 		if (av_interleaved_write_frame(ofmt_ctx, &pkt) < 0) {
 			printf("[%s][Error]:Error muxing packet line:%d\n", __func__, __LINE__);

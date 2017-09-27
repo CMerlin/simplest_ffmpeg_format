@@ -73,6 +73,7 @@ static inline int av_cmp_q(AVRational a, AVRational b){
 }
 
 /**
+ * 把AVRatioal结构转换成double
  * Convert rational to double.
  * @param a rational to convert
  * @return (double) a
