@@ -67,6 +67,28 @@ void printAVPacketInfo(struct AVPacket *pkt)
 	return ;
 }
 
+/*****************************************************************************
+* Description:获取视频的分辨率
+*****************************************************************************/
+int getResolution(char *resolution, AVStream *pst)
+{
+	sprintf(resolution, "%dx%d", (pst->codec->coded_height), (pst->codec->coded_width));
+	return 0;
+}
+
+/**************************************************************************
+* Description:获取视频的帧率
+* Return：0>-帧率， 0<-出错
+**************************************************************************/
+int getFps(AVStream *pst)
+{
+	if(0 == (pst->avg_frame_rate.den)){
+		return -1; /* 分母不能为0 */
+	}
+	int frame_rate=(pst->avg_frame_rate.num)/(pst->avg_frame_rate.den);//每秒多少帧
+	return frame_rate;
+}
+
 /************************************************************************
 * Description:计算音视频文件的长度，单位是秒
 * Return:视频文件的长度(单位是秒)
@@ -101,6 +123,23 @@ int seekFrame(long long pos, int stream_index, AVFormatContext *fmtctx)
 	int64_t timestamp = pos * AV_TIME_BASE;
 	ret = av_seek_frame(fmtctx, stream_index, timestamp, AVSEEK_FLAG_BACKWARD);
 	return ret;
+}
+
+/************************************************************************************
+* Description:输出一些 信息
+************************************************************************************/
+int PrintAVStreamInfo(AVStream *pst)
+{
+	char buffer[64] = {0};
+
+	/*视频的分辨率*/
+	getResolution(buffer, pst);
+	/*视频的帧率*/
+	int Fps = getFps(pst);
+	/*视频文件的长度，单位是秒*/
+	double FileLen = getFileLen(pst);
+	printf("[%s]:fileLen=%lf Fps=%d Resolution=%s line:%d\n", __func__, FileLen, Fps, buffer, __LINE__);
+	return 0;
 }
 
 int main(int argc, char* argv[])
@@ -155,8 +194,9 @@ int main(int argc, char* argv[])
 			AVStream *in_stream = ifmt_ctx->streams[i];
 			AVStream *out_stream = NULL;
 
-			printf("[%s]:index=%d fileLen=%lf line:%d\n", __func__, i, getFileLen(in_stream), __LINE__);
+			//printf("[%s]:index=%d fileLen=%lf fps=%d line:%d\n", __func__, i, getFileLen(in_stream), getFps(in_stream), __LINE__);
 			if(ifmt_ctx->streams[i]->codec->codec_type==AVMEDIA_TYPE_VIDEO){
+				PrintAVStreamInfo(in_stream);
 				videoindex=i;
 				out_stream=avformat_new_stream(ofmt_ctx_v, in_stream->codec->codec);
 				ofmt_ctx=ofmt_ctx_v;
