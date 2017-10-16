@@ -117,25 +117,25 @@ double getFileLen(const AVStream *st)
 
 /************************************************************************
 * Desription:计算某桢，在整个视频中的时间位置
-* Return：位置(单位是秒)
+* Return：位置(单位是毫秒)
 ************************************************************************/
 double curPosition(double pts, const AVStream *st)
 {
 	double ret = 0;
-	ret = pts * av_q2d(st->time_base); /* 现在可以根据pts来计算一桢在整个视频中的时间位置 */
+	ret = (1000*pts) * av_q2d(st->time_base); /* 现在可以根据pts来计算一桢在整个视频中的时间位置 */
 	return ret;
 }
 
 /************************************************************************
-* Description:把视频跳转到第N秒
-* Input pos:需要跳转的位置（单位是秒）
+* Description:把视频跳转到第N毫秒
+* Input pos:需要跳转的位置（单位是毫秒）
 * Input stream_index：通道号，其实也就是时间的类型，视频或是音频
 * Reurun:0-成功 -1-：失败
 *************************************************************************/
-int seekFrame(long long pos, int stream_index, AVFormatContext *fmtctx)
+int seekFrame(long long pos, int stream_index, AVStream *pst, AVFormatContext *fmtctx)
 {
 	int ret = 0;
-	int64_t timestamp = pos * AV_TIME_BASE;
+	int64_t timestamp = (pos/1000) / av_q2d(pst->time_base);
 	ret = av_seek_frame(fmtctx, stream_index, timestamp, AVSEEK_FLAG_BACKWARD);
 	return ret;
 }
@@ -166,13 +166,16 @@ int showFramAttr(AVPacket *pkt, AVStream *pst)
 {
 	static int count = 0;
 	count++;
+#if 0
 	if(30 < count){
 		return 0;
 	}
+#endif
+	double curPos = curPosition((pkt->pts), pst);
 	double TStamp = getTimestamp(pkt, pst); /* 时间戳 */
 	if(AVMEDIA_TYPE_VIDEO == (pkt->stream_index)){
-		printf("[%s]:DType=%d Ftype=%d duration=%lld TStamp=%lf line:%d ", __func__, (pkt->stream_index), (pkt->flags), (pkt->duration), TStamp, __LINE__); /* 视频 */
-		printf("count=%d pts=%lld spts=%lld ret=%lld base_time:%d/%d\n", count, (pkt->pts), (pst->start_time), ((pkt->pts)-(pst->start_time)), (pst->time_base.num), (pst->time_base.den));
+		printf("[%s]:DType=%d Ftype=%d duration=%lld TStamp=%lf curPos=%lf line:%d\n", __func__, (pkt->stream_index), (pkt->flags), (pkt->duration), TStamp, curPos, __LINE__); /* 视频 */
+		//printf("count=%d pts=%lld spts=%lld ret=%lld base_time:%d/%d\n", count, (pkt->pts), (pst->start_time), ((pkt->pts)-(pst->start_time)), (pst->time_base.num), (pst->time_base.den));
 	}
 #if 0
 	//pst->start_time; /* 第一帧流的pts */
@@ -290,6 +293,7 @@ int main(int argc, char* argv[])
 			AVStream *out_stream = NULL;
 
 			//printf("[%s]:index=%d fileLen=%lf fps=%d line:%d\n", __func__, i, getFileLen(in_stream), getFps(in_stream), __LINE__);
+			seekFrame((30*1000), AVMEDIA_TYPE_VIDEO, in_stream, ifmt_ctx);
 			if(ifmt_ctx->streams[i]->codec->codec_type==AVMEDIA_TYPE_VIDEO){
 				PrintAVStreamInfo(in_stream);
 				videoindex=i;
@@ -372,7 +376,7 @@ int main(int argc, char* argv[])
 			/*输出视频文件*/
 			out_stream = ofmt_ctx_v->streams[0];
 			ofmt_ctx=ofmt_ctx_v;
-			printf("[%s]:frame_index=%d time_stamp=%lf line:%d\n", __func__, frame_index, (getTimestamp(&pkt, in_stream)), __LINE__);
+			//printf("[%s]:frame_index=%d time_stamp=%lf line:%d\n", __func__, frame_index, (getTimestamp(&pkt, in_stream)), __LINE__);
 			//seekFrame(20, videoindex, ofmt_ctx);
 			//printf("Write Video Packet. size:%d\tpts:%lld\n",pkt.size,pkt.pts);
 #if USE_H264BSF
