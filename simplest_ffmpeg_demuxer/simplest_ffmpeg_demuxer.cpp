@@ -394,10 +394,55 @@ int getMediaData(AVFormatContext *ifmt_ctx, AVFormatContext *ofmt_ctx_v, AVForma
 	return 0;
 }
 
+/**********************************************************************
+* Description:读取一段视频数据
+************************************************************************/
+int getDatafromMedia(AVFormatContext *inctx, AVFormatContext *outctx, int sindex, uint64_t begin, uint64_t end)
+{
+	uint64_t curTStamp = 0;
+	int frame_index = 0;
+	AVPacket pkt;
+	AVFormatContext *ofmt_ctx;
+	AVStream *in_stream = NULL, *out_stream = NULL;
+
+	/* 定位到读文件的位置 */
+	in_stream  = inctx->streams[sindex];
+	seekFrame(begin, sindex, in_stream, inctx); /* 定位文件的位置 */
+	while (1) {
+		/* 读输入文件，数据帧 */
+		memset(&pkt, 0, sizeof(pkt));
+		if (av_read_frame(inctx, &pkt) < 0){
+			printf("[%s]:Failed to get the data frame! line:%d\n");
+			break;
+		}
+		/* 获取音频会视频数据 */
+		in_stream  = inctx->streams[pkt.stream_index];
+		showFramAttr(&pkt, in_stream);
+		if(pkt.stream_index != sindex){
+			continue; /* 不对非视频流进行处理 */
+		}
+		/* 检查时间戳 */
+		double curTStamp = getTimestamp(&pkt, in_stream); /* 时间戳 */
+		if((uint64_t)(curTStamp) >= end){
+			printf("[%s][Debug]:curTStamp=%lf end=%lld line:%d\n", __func__, curTStamp, end, __LINE__);
+			break;	/* 结束时间点 */
+		}
+		/* 将音视频数据写入到输出文件中 */
+		out_stream = outctx->streams[0];
+		if(0 > writeDataToFile(outctx, &pkt, in_stream, out_stream)){
+			break;
+		}
+		av_free_packet(&pkt);
+		frame_index++;
+	}
+	return 0;
+	return 0;
+}
+
 /*****************************************************************************************
 * Description:此测试程序实现的功能是，将媒体文件中的音视频数据分开，存储到不同的文件中
 ******************************************************************************************/
-int test_separate_file(int argc, char* argv[])
+int test_separate_file()
 {
 	AVOutputFormat *ofmt_a = NULL,*ofmt_v = NULL;
 	AVFormatContext *ifmt_ctx = NULL, *ofmt_ctx_a = NULL, *ofmt_ctx_v = NULL;
@@ -419,7 +464,9 @@ int test_separate_file(int argc, char* argv[])
 	/* 对输出文件进行初始化设置 */
 	initVideoFile(ofmt_ctx_v, ifmt_ctx, videoindex); /* 写文件的头部信息 */
 	initVideoFile(ofmt_ctx_a, ifmt_ctx, audioindex); /* 写文件的头部信息 */
-	getMediaData(ifmt_ctx, ofmt_ctx_v, ofmt_ctx_a, videoindex, audioindex); /* 将媒体数据分别存储到不同的文件中 */
+	//getMediaData(ifmt_ctx, ofmt_ctx_v, ofmt_ctx_a, videoindex, audioindex); /* 将媒体数据分别存储到不同的文件中 */
+	//getDatafromMedia(ifmt_ctx, ofmt_ctx_v, videoindex, (20*1000), (30*1000));
+	//getDatafromMedia(ifmt_ctx, ofmt_ctx_a, audioindex, (20*1000), (30*1000));
 	/* 给输出文件添加上尾 */
 	av_write_trailer(ofmt_ctx_a);
 	av_write_trailer(ofmt_ctx_v);
@@ -430,7 +477,7 @@ int test_separate_file(int argc, char* argv[])
 #endif
 /*E****************************************************************************************/
 
-
+#if 1
 int main(int argc, char* argv[])
 {
 	AVOutputFormat *ofmt_a = NULL,*ofmt_v = NULL;
@@ -627,5 +674,5 @@ end:
 	}
 	return 0;
 }
-
+#endif
 
