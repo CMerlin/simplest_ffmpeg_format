@@ -263,8 +263,23 @@ int writeDataToFile(AVFormatContext *ofmt_ctx, AVPacket *pkt, AVStream *in_strea
 /****************************************************************************************
  * Description:打开输入文件
  ****************************************************************************************/
-AVFormatContext* openInFile(AVFormatContext *ifmt_ctx, const char *filePath)
+//AVFormatContext* openInFile(AVFormatContext *ifmt_ctx, const char *filePath)
+int openInFile(AVFormatContext **ifmt_ctx, const char *filePath)
 {
+#if 1
+	int ret = 0;
+	if ((ret = avformat_open_input(ifmt_ctx, filePath, 0, 0)) < 0) {
+		printf("[%s][Error]:Could not open input file. line:%d\n", __func__, __LINE__);
+		return -1;
+	}
+	if ((ret = avformat_find_stream_info(*ifmt_ctx, 0)) < 0) {
+		printf("[%s][Error]:Failed to retrieve input stream information line:%d\n", __func__, __LINE__);
+		return -1;
+	}
+	return 0;
+#endif
+
+#if 0
 	int ret = 0;
 	if ((ret = avformat_open_input(&ifmt_ctx, filePath, 0, 0)) < 0) {
 		printf("[%s][Error]:Could not open input file. line:%d\n", __func__, __LINE__);
@@ -275,27 +290,29 @@ AVFormatContext* openInFile(AVFormatContext *ifmt_ctx, const char *filePath)
 		return NULL;
 	}
 	return ifmt_ctx;
+#endif
 }
-
 
 /**************************************************************************************
  * Description:打开输出文件
  ***************************************************************************************/
-AVFormatContext* openOutFile(AVFormatContext *ofmt_ctx_out, const char *filePath){
+int openOutFile(AVFormatContext **ofmt_ctx_out, const char *filePath){
 	/* 初始化输出的 AVFormatContext*/
-	avformat_alloc_output_context2(&ofmt_ctx_out, NULL, NULL, filePath);
-	if (!ofmt_ctx_out) {
-		printf("[%s][Error]:Could not create output context line:%d\n", __func__, __LINE__);
-		return NULL;
+	avformat_alloc_output_context2(ofmt_ctx_out, NULL, NULL, filePath);
+	//if(!(*ofmt_ctx_out)){
+	if(!*ofmt_ctx_out){
+		printf("[%s][Error]:Could not deduce output format from file extension,using MPEG line:%d\n", __func__, __LINE__);
+		avformat_alloc_output_context2(ofmt_ctx_out, NULL, "mpeg", filePath);
 	}
 	/* 打开输出文件 */
-	if (!(ofmt_ctx_out->oformat->flags & AVFMT_NOFILE)) {
-		if (avio_open(&ofmt_ctx_out->pb, filePath, AVIO_FLAG_WRITE) < 0) {
+	if (!((*ofmt_ctx_out)->oformat->flags & AVFMT_NOFILE)) {
+		if (avio_open(&(*ofmt_ctx_out)->pb, filePath, AVIO_FLAG_WRITE) < 0) {
 			printf("[%s][Error]:Could not open output file '%s' line:%d\n", __func__, filePath, __LINE__);
-			return NULL;
+			return -1;
 		}
 	}
-	return ofmt_ctx_out;
+	return 0;
+
 }
 
 /******************************************************************************
@@ -309,7 +326,7 @@ int parseMediaAttr(AVFormatContext *ifmt_ctx, int *videoindex, int *audioindex)
 	AVStream *out_stream = NULL;
 	for (i = 0; i < ifmt_ctx->nb_streams; i++) {
 		AVStream *in_stream = ifmt_ctx->streams[i];
-		seekFrame((15*1000), AVMEDIA_TYPE_VIDEO, in_stream, ifmt_ctx); /* 定位文件的位置 */
+		//seekFrame((15*1000), AVMEDIA_TYPE_VIDEO, in_stream, ifmt_ctx); /* 定位文件的位置 */
 		if(ifmt_ctx->streams[i]->codec->codec_type==AVMEDIA_TYPE_VIDEO){
 			*videoindex=i;
 		}else if(ifmt_ctx->streams[i]->codec->codec_type==AVMEDIA_TYPE_AUDIO){
@@ -369,7 +386,7 @@ int getMediaData(AVFormatContext *ifmt_ctx, AVFormatContext *ofmt_ctx_v, AVForma
 		/* 读输入文件，数据帧 */
 		memset(&pkt, 0, sizeof(pkt));
 		if (av_read_frame(ifmt_ctx, &pkt) < 0){
-			printf("[%s]:Failed to get the data frame! line:%d\n");
+			printf("[%s]:Failed to get the data frame! line:%d\n", __func__, __LINE__);
 			break;
 		}
 		/* 获取音频会视频数据 */
@@ -405,6 +422,7 @@ int getDatafromMedia(AVFormatContext *inctx, AVFormatContext *outctx, int sindex
 	AVFormatContext *ofmt_ctx;
 	AVStream *in_stream = NULL, *out_stream = NULL;
 
+	printf("[%s]:begin=%lld end=%lld line:%d\n", __func__, begin, end, __LINE__);
 	/* 定位到读文件的位置 */
 	in_stream  = inctx->streams[sindex];
 	seekFrame(begin, sindex, in_stream, inctx); /* 定位文件的位置 */
@@ -412,7 +430,7 @@ int getDatafromMedia(AVFormatContext *inctx, AVFormatContext *outctx, int sindex
 		/* 读输入文件，数据帧 */
 		memset(&pkt, 0, sizeof(pkt));
 		if (av_read_frame(inctx, &pkt) < 0){
-			printf("[%s]:Failed to get the data frame! line:%d\n");
+			printf("[%s]:Failed to get the data frame! line:%d\n", __func__, __LINE__);
 			break;
 		}
 		/* 获取音频会视频数据 */
@@ -450,23 +468,22 @@ int test_separate_file()
 
 	/*输入和输出文件的名称*/
 	const char *in_filename  = "cuc_ieschool.ts";//输入的每天文件
-	//const char *in_filename  = "cuc_ieschool.mp4";//输入的每天文件
 	const char *out_filename_v = "cuc_ieschool.h264"; /* 输出的视频文件 */
 	const char *out_filename_a = "cuc_ieschool.aac"; /* 输出的音频文件 */
 	printf("[%s]:inFile=%s outFile=%s-%s line:%d\n", __func__, in_filename, out_filename_v, out_filename_a, __LINE__);
 
 	av_register_all();
 	/* 打开输入和输出文件 */
-	ifmt_ctx = openInFile(ifmt_ctx, in_filename); /* 打开输入文件 */
-	ofmt_ctx_v = openOutFile(ofmt_ctx_v, out_filename_v); /* 打开输出视频文件 */
-	ofmt_ctx_a = openOutFile(ofmt_ctx_a, out_filename_a); /* 打开输出音频文件 */
+	openInFile(&ifmt_ctx, in_filename); /* 打开输入文件 */
+	openOutFile(&ofmt_ctx_v, out_filename_v);
+	openOutFile(&ofmt_ctx_a, out_filename_a);
 	parseMediaAttr(ifmt_ctx, &videoindex, &audioindex);
 	/* 对输出文件进行初始化设置 */
 	initVideoFile(ofmt_ctx_v, ifmt_ctx, videoindex); /* 写文件的头部信息 */
 	initVideoFile(ofmt_ctx_a, ifmt_ctx, audioindex); /* 写文件的头部信息 */
-	//getMediaData(ifmt_ctx, ofmt_ctx_v, ofmt_ctx_a, videoindex, audioindex); /* 将媒体数据分别存储到不同的文件中 */
-	//getDatafromMedia(ifmt_ctx, ofmt_ctx_v, videoindex, (20*1000), (30*1000));
-	//getDatafromMedia(ifmt_ctx, ofmt_ctx_a, audioindex, (20*1000), (30*1000));
+	////getMediaData(ifmt_ctx, ofmt_ctx_v, ofmt_ctx_a, videoindex, audioindex); /* 将媒体数据分别存储到不同的文件中 */
+	getDatafromMedia(ifmt_ctx, ofmt_ctx_v, videoindex, (10*1000), (20*1000));
+	getDatafromMedia(ifmt_ctx, ofmt_ctx_a, audioindex, (20*1000), (30*1000));
 	/* 给输出文件添加上尾 */
 	av_write_trailer(ofmt_ctx_a);
 	av_write_trailer(ofmt_ctx_v);
