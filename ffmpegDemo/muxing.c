@@ -49,6 +49,27 @@
 
 #define SCALE_FLAGS SWS_BICUBIC
 
+#if 1 /*自定义的结构体*/
+/*视频属性信息*/
+typedef struct _CodeVAttr{
+	/*分辨率*/
+	int width;
+	int height;
+	int bit_rate; /*码率*/
+	int frame_rate; /*帧率 帧/秒*/
+	int codec_id; /*编码类型*/
+} CODEV_ATTR, *P_CODEV_ATTR; 
+/*音频属性信息*/
+typedef struct _CodeAAttr{
+	/*分辨率*/
+	int width;
+	int height;
+	int bit_rate; /*码率*/
+	int sample_rate; /*采样率*/
+} CODEA_ATTR, *P_CODEA_ATTR; 
+
+#endif
+
 // a wrapper around a single output AVStream
 typedef struct OutputStream {
     AVStream *st;
@@ -67,6 +88,9 @@ typedef struct OutputStream {
     struct SwrContext *swr_ctx;
 } OutputStream;
 
+/*******************************************************************************
+* Description:打印AVPacket相关的信息
+******************************************************************************/
 static void log_packet(const AVFormatContext *fmt_ctx, const AVPacket *pkt)
 {
     AVRational *time_base = &fmt_ctx->streams[pkt->stream_index]->time_base;
@@ -80,21 +104,150 @@ static void log_packet(const AVFormatContext *fmt_ctx, const AVPacket *pkt)
 
 /*****************************************************************************************
 * Description:将数据写如何到文件中
+* Input fmt_ctx:输出文件
+* Input:pkt-已经经过编码的数据
+* Return:
 ******************************************************************************************/
 static int write_frame(AVFormatContext *fmt_ctx, const AVRational *time_base, AVStream *st, AVPacket *pkt)
 {
     /* rescale output packet timestamp values from codec to stream timebase */
     av_packet_rescale_ts(pkt, *time_base, st->time_base);
     pkt->stream_index = st->index;
-#if 0 //下面两句我加的，加了才不是提示“encoder did not produce proper pts, make some up”错误 
-    pkt->pts = av_rescale_q(pkt->pts, st->codec->time_base, st->time_base);
-    pkt->dts = av_rescale_q(pkt->dts, st->codec->time_base, st->time_base);  
-    pkt->duration = av_rescale_q(pkt->duration, st->codec->time_base, st->time_base); 
-#endif
     /* Write the compressed frame to the media file. */
-    log_packet(fmt_ctx, pkt);
+    //log_packet(fmt_ctx, pkt);
     return av_interleaved_write_frame(fmt_ctx, pkt);
 }
+
+/*************************************************************
+* Description:音视频编码器相关设置信息
+**************************************************************/
+int initCodeAttr(CODEV_ATTR *videoAttr, CODEA_ATTR *audioAttr){
+	/*视频的*/
+	videoAttr->frame_rate = STREAM_FRAME_RATE;
+	videoAttr->bit_rate = 400000;
+	videoAttr->width    = 352;
+    videoAttr->height   = 288;
+	videoAttr->frame_rate = 15;
+	videoAttr->width    = 720;
+    videoAttr->height   = 480;
+	/*音频的*/
+	audioAttr->bit_rate	= 64000;
+	audioAttr->sample_rate = 44100;
+	
+	return 0;
+}
+
+
+/*******************************************************************************************
+* Description:设置视频编码器的相关信息
+* Input c:设置后的编码参数
+* Output:pattr-编码信息
+* Return:0-成功
+********************************************************************************************/
+int setCodeAttrV(AVCodecContext *c, CODEV_ATTR* pattr)
+{
+	     //c->codec_id = codec_id;
+		 c->codec_id = pattr->codec_id;
+
+        //c->bit_rate = 400000;
+        c->bit_rate = (pattr->bit_rate);
+        /* Resolution must be a multiple of two. */
+        //c->width    = 352;
+        //c->height   = 288;
+        c->width    = (pattr->width);
+        c->height   = (pattr->height);
+        /* timebase: This is the fundamental unit of time (in seconds) in terms
+         * of which frame timestamps are represented. For fixed-fps content,
+         * timebase should be 1/framerate and timestamp increments should be
+         * identical to 1. */
+        //ost->st->time_base = (AVRational){ 1, STREAM_FRAME_RATE };
+        //c->time_base       = ost->st->time_base;
+         c->time_base       = (AVRational){ 1, (pattr->frame_rate) };
+
+        c->gop_size      = 12; /* emit one intra frame every twelve frames at most */
+        c->pix_fmt       = STREAM_PIX_FMT;
+        if (c->codec_id == AV_CODEC_ID_MPEG2VIDEO) {
+            /* just for testing, we also add B-frames */
+            c->max_b_frames = 2;
+        }
+        if (c->codec_id == AV_CODEC_ID_MPEG1VIDEO) {
+            /* Needed to avoid using macroblocks in which some coeffs overflow.
+             * This does not happen with normal video, it just happens here as
+             * the motion of the chroma plane does not match the luma plane. */
+            c->mb_decision = 2;
+        }
+	return 0;
+}
+
+/*******************************************************************************************
+* Description:设置音频编码器的相关信息
+* Input c:设置后的编码参数
+* Output： pattr-编码信息 codec-编码器的一些信息
+* Return:0-成功
+********************************************************************************************/
+int setCodeAttrA(AVCodecContext *c, CODEA_ATTR* pattr, AVCodec *codec)
+{
+#if 1
+		int i = 0;
+		c->sample_fmt  = codec->sample_fmts ?
+				codec->sample_fmts[0] : AV_SAMPLE_FMT_FLTP;
+			//c->bit_rate	 = 64000;
+			//c->sample_rate = 44100;
+			c->bit_rate    = pattr->bit_rate;
+			c->sample_rate = pattr->sample_rate;
+			if (codec->supported_samplerates) {
+				c->sample_rate = codec->supported_samplerates[0];
+				for (i = 0; codec->supported_samplerates[i]; i++) {
+					if (codec->supported_samplerates[i] == 44100)
+						//c->sample_rate = 44100;
+						c->sample_rate = (pattr->sample_rate);
+				}
+			}
+			c->channels 	   = av_get_channel_layout_nb_channels(c->channel_layout);
+			c->channel_layout = AV_CH_LAYOUT_STEREO;
+			if (codec->channel_layouts) {
+				c->channel_layout = codec->channel_layouts[0];
+				for (i = 0; codec->channel_layouts[i]; i++) {
+					if (codec->channel_layouts[i] == AV_CH_LAYOUT_STEREO)
+						c->channel_layout = AV_CH_LAYOUT_STEREO;
+				}
+			}
+			c->channels 	   = av_get_channel_layout_nb_channels(c->channel_layout);
+			//ost->st->time_base = (AVRational){ 1, c->sample_rate };
+		return 0;
+#endif
+
+#if 0
+	int i = 0;
+	c->sample_fmt  = (*codec)->sample_fmts ?
+            (*codec)->sample_fmts[0] : AV_SAMPLE_FMT_FLTP;
+        //c->bit_rate    = 64000;
+        //c->sample_rate = 44100;
+        c->bit_rate    = pattr->bit_rate;
+        c->sample_rate = pattr->sample_rate;
+        if ((*codec)->supported_samplerates) {
+            c->sample_rate = (*codec)->supported_samplerates[0];
+            for (i = 0; (*codec)->supported_samplerates[i]; i++) {
+                if ((*codec)->supported_samplerates[i] == 44100)
+                    //c->sample_rate = 44100;
+					c->sample_rate = (pattr->sample_rate);
+            }
+        }
+        c->channels        = av_get_channel_layout_nb_channels(c->channel_layout);
+        c->channel_layout = AV_CH_LAYOUT_STEREO;
+        if ((*codec)->channel_layouts) {
+            c->channel_layout = (*codec)->channel_layouts[0];
+            for (i = 0; (*codec)->channel_layouts[i]; i++) {
+                if ((*codec)->channel_layouts[i] == AV_CH_LAYOUT_STEREO)
+                    c->channel_layout = AV_CH_LAYOUT_STEREO;
+            }
+        }
+        c->channels        = av_get_channel_layout_nb_channels(c->channel_layout);
+        //ost->st->time_base = (AVRational){ 1, c->sample_rate };
+	return 0;
+#endif
+}
+
 
 /***************************************************************************************
 * Description:添加一个输出流
@@ -108,6 +261,7 @@ static void add_stream(OutputStream *ost, AVFormatContext *oc,
     AVCodecContext *c;
     int i;
 
+	printf("[%s]:codec_id=%d line:%d\n", __func__, codec_id, __LINE__);
     /* 查找编码器 */
     *codec = avcodec_find_encoder(codec_id);
     if (!(*codec)) {
@@ -129,8 +283,32 @@ static void add_stream(OutputStream *ost, AVFormatContext *oc,
         fprintf(stderr, "Could not alloc an encoding context\n");
         exit(1);
     }
-    ost->enc = c;
-
+	ost->enc = c;
+#if 1
+	CODEV_ATTR videoAttr = {0};
+	CODEA_ATTR audioAttr = {0};
+	initCodeAttr(&videoAttr, &audioAttr);
+	switch ((*codec)->type) {
+	case AVMEDIA_TYPE_VIDEO:
+	{
+		ost->st->time_base = (AVRational){ 1, (videoAttr.frame_rate) };
+		setCodeAttrV(c, &videoAttr);
+		break;
+	}
+	case AVMEDIA_TYPE_AUDIO:
+	{
+		ost->st->time_base = (AVRational){ 1, (audioAttr.sample_rate) };
+		setCodeAttrA(c, &audioAttr, *codec);
+		break;
+	}
+	default:
+		break;
+	}
+#endif
+#if 0
+	/*****************************************************************
+	* Description:检查编码类型，根据类型设置相关的参数
+	******************************************************************/
     switch ((*codec)->type) {
     case AVMEDIA_TYPE_AUDIO:
         c->sample_fmt  = (*codec)->sample_fmts ?
@@ -188,7 +366,7 @@ static void add_stream(OutputStream *ost, AVFormatContext *oc,
     default:
         break;
     }
-
+#endif
     /* Some formats want stream headers to be separate. */
     if (oc->oformat->flags & AVFMT_GLOBALHEADER)
         c->flags |= AV_CODEC_FLAG_GLOBAL_HEADER;
@@ -225,10 +403,13 @@ static AVFrame *alloc_audio_frame(enum AVSampleFormat sample_fmt,
     return frame;
 }
 
+/*****************************************************************************************
+ * Description:打开视频编码器
+ **********************************************************************************************/
 static void open_audio(AVFormatContext *oc, AVCodec *codec, OutputStream *ost, AVDictionary *opt_arg)
 {
-    AVCodecContext *c;
-    int nb_samples;
+	AVCodecContext *c;
+	int nb_samples;
     int ret;
     AVDictionary *opt = NULL;
 
@@ -409,6 +590,9 @@ static AVFrame *alloc_picture(enum AVPixelFormat pix_fmt, int width, int height)
     return picture;
 }
 
+/*****************************************************************************************
+* Description:打开视频编码器
+**********************************************************************************************/
 static void open_video(AVFormatContext *oc, AVCodec *codec, OutputStream *ost, AVDictionary *opt_arg)
 {
     int ret;
@@ -417,18 +601,19 @@ static void open_video(AVFormatContext *oc, AVCodec *codec, OutputStream *ost, A
 
     av_dict_copy(&opt, opt_arg, 0);
 
-    /* open the codec */
+    /* 打开视频编码器 */
     ret = avcodec_open2(c, codec, &opt);
     av_dict_free(&opt);
     if (ret < 0) {
-        fprintf(stderr, "Could not open video codec: %s\n", av_err2str(ret));
+        fprintf(stderr, "[Error]:Could not open video codec: %s\n", av_err2str(ret));
         exit(1);
     }
 
+	printf("[%s]:YUV420P=%d-%d line:%d\n", __func__, (c->width), (c->height), __LINE__); /* 需要创建的YUV图像的大小 */
     /* allocate and init a re-usable frame */
     ost->frame = alloc_picture(c->pix_fmt, c->width, c->height);
     if (!ost->frame) {
-        fprintf(stderr, "Could not allocate video frame\n");
+        fprintf(stderr, "[Error]:Could not allocate video frame\n");
         exit(1);
     }
 
@@ -439,7 +624,7 @@ static void open_video(AVFormatContext *oc, AVCodec *codec, OutputStream *ost, A
     if (c->pix_fmt != AV_PIX_FMT_YUV420P) {
         ost->tmp_frame = alloc_picture(AV_PIX_FMT_YUV420P, c->width, c->height);
         if (!ost->tmp_frame) {
-            fprintf(stderr, "Could not allocate temporary picture\n");
+            fprintf(stderr, "[Error]:Could not allocate temporary picture\n");
             exit(1);
         }
     }
@@ -447,7 +632,7 @@ static void open_video(AVFormatContext *oc, AVCodec *codec, OutputStream *ost, A
     /* copy the stream parameters to the muxer */
     ret = avcodec_parameters_from_context(ost->st->codecpar, c);
     if (ret < 0) {
-        fprintf(stderr, "Could not copy the stream parameters\n");
+        fprintf(stderr, "[Error]:Could not copy the stream parameters\n");
         exit(1);
     }
 }
@@ -474,10 +659,15 @@ static void fill_yuv_image(AVFrame *pict, int frame_index,
     }
 }
 
+/*********************************************************************************
+* Description:从yuv输入流中获取一帧YUV数据
+* Input ost：YUV流
+* Return：NULL != 获取到的YUV数据
+**********************************************************************************/
 static AVFrame *get_video_frame(OutputStream *ost)
 {
     AVCodecContext *c = ost->enc;
-
+	
     /* check if we want to generate more frames */
     if (av_compare_ts(ost->next_pts, c->time_base,
                       STREAM_DURATION, (AVRational){ 1, 1 }) >= 0)
@@ -488,6 +678,7 @@ static AVFrame *get_video_frame(OutputStream *ost)
     if (av_frame_make_writable(ost->frame) < 0)
         exit(1);
 
+	/* 生成特定格式的YUV数据给编码器 */
     if (c->pix_fmt != AV_PIX_FMT_YUV420P) {
         /* as we only generate a YUV420P picture, we must convert it
          * to the codec pixel format if needed */
@@ -498,8 +689,7 @@ static AVFrame *get_video_frame(OutputStream *ost)
                                           c->pix_fmt,
                                           SCALE_FLAGS, NULL, NULL, NULL);
             if (!ost->sws_ctx) {
-                fprintf(stderr,
-                        "Could not initialize the conversion context\n");
+                fprintf(stderr, "[Error]:Could not initialize the conversion context\n");
                 exit(1);
             }
         }
@@ -520,39 +710,40 @@ static AVFrame *get_video_frame(OutputStream *ost)
  * encode one video frame and send it to the muxer
  * return 1 when encoding is finished, 0 otherwise
  */
+
+/*************************************************************************************************
+* Description:
+* Input oc:输出的设备的文件描述符（可以简单的看成一个视频文件描述符）
+* Input ost:YUV数据流文件(可以看成流文件描述符)
+* 0-成功 1-失败
+***************************************************************************************************/
 static int write_video_frame(AVFormatContext *oc, OutputStream *ost)
 {
-    int ret;
-    AVCodecContext *c;
-    AVFrame *frame;
-    int got_packet = 0;
-    AVPacket pkt = { 0 };
+	int ret;
+	AVCodecContext *c;
+	AVFrame *frame;
+	int got_packet = 0;
+	AVPacket pkt = { 0 };
 
-    c = ost->enc;
+	c = ost->enc; /* 编码器 */
+	frame = get_video_frame(ost); 	/*从流中获取一帧YUV数据*/
 
-    frame = get_video_frame(ost);
-
-    av_init_packet(&pkt);
-
-    /* encode the image */
-    ret = avcodec_encode_video2(c, &pkt, frame, &got_packet);
-    if (ret < 0) {
-        fprintf(stderr, "Error encoding video frame: %s\n", av_err2str(ret));
-        exit(1);
-    }
-
-    if (got_packet) {
-        ret = write_frame(oc, &c->time_base, ost->st, &pkt);
-    } else {
-        ret = 0;
-    }
-
-    if (ret < 0) {
-        fprintf(stderr, "Error while writing video frame: %s\n", av_err2str(ret));
-        exit(1);
-    }
-
-    return (frame || got_packet) ? 0 : 1;
+	/* 将YUV数据进行编码操作 */
+	av_init_packet(&pkt); /*初始化pkt*/
+	ret = avcodec_encode_video2(c, &pkt, frame, &got_packet);
+	if (ret < 0) {
+		fprintf(stderr, "[Error]:encoding video frame: %s\n", av_err2str(ret));
+		exit(1);
+	}
+	/* 将编码号的数据写入到输出文件中 */
+	if (got_packet) {
+		ret = write_frame(oc, &c->time_base, ost->st, &pkt);
+		if (ret < 0) {
+			fprintf(stderr, "[Error]:while writing video frame: %s\n", av_err2str(ret));
+			exit(1);
+		}
+	}
+	return (frame || got_packet) ? 0 : 1;
 }
 
 static void close_stream(AVFormatContext *oc, OutputStream *ost)
@@ -625,6 +816,7 @@ int main(int argc, char **argv)
     av_register_all();
 
     if (argc < 2) {
+#if 0
         printf("[%s]:usage: %s output_file\n"
                "API example program to output a media file with libavformat.\n"
                "This program generates a synthetic audio and video stream, encodes and\n"
@@ -632,7 +824,8 @@ int main(int argc, char **argv)
                "The output format is automatically guessed according to the file extension.\n"
                "Raw images can also be output by using '%%d' in the filename.\n"
                " line:%d\n", __func__, argv[0], __LINE__);
-        return 1;
+#endif
+		return 1;
     }
 
     filename = argv[1];
@@ -643,7 +836,7 @@ int main(int argc, char **argv)
     }
 #endif
 
-#if 0
+#if 1
     /* 创建输出媒体的 context */
     avformat_alloc_output_context2(&oc, NULL, NULL, filename);
     if (!oc) {
@@ -662,6 +855,7 @@ int main(int argc, char **argv)
     /* Add the audio and video streams using the default format codecs
      * and initialize the codecs. */
     if (fmt->video_codec != AV_CODEC_ID_NONE) {
+		fmt->video_codec = AV_CODEC_ID_H264; /*H264编码方式*/
         add_stream(&video_st, oc, &video_codec, fmt->video_codec);
         have_video = 1;
         encode_video = 1;
@@ -696,11 +890,9 @@ int main(int argc, char **argv)
 #endif
 
 	/* 写输出文件的头 */
-    /* Write the stream header, if any. */
     ret = avformat_write_header(oc, &opt);
     if (ret < 0) {
-        fprintf(stderr, "Error occurred when opening output file: %s\n",
-                av_err2str(ret));
+        printf("[%s]:Error occurred when opening output file: %s line:%d\n", __func__, av_err2str(ret), __LINE__);
         return 1;
     }
 
